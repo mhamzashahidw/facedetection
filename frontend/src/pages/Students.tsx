@@ -64,21 +64,37 @@ export default function Students() {
     }
   };
 
+  const abortCapture = useRef(false);
+  const [validationMsg, setValidationMsg] = useState('');
+
   const handleEnrollClick = (student: Student) => {
     setSelectedStudent(student);
     setImages([]);
     setEnrollStatus('idle');
+    setValidationMsg('');
+    abortCapture.current = false;
     setEnrollModal(true);
+  };
+
+  const cancelEnrollment = () => {
+    abortCapture.current = true;
+    setEnrollStatus('idle');
+    setValidationMsg('');
+    setEnrollModal(false);
   };
 
   const captureImagesForEnrollment = async () => {
     if (!webcamRef.current) return;
     setEnrollStatus('capturing');
+    abortCapture.current = false;
+    setValidationMsg('');
     
     const tempImages: string[] = [];
     
     // Async recursive function to validate frame by frame
     const captureNextFrame = async (currentStep: number) => {
+      if (abortCapture.current) return; // Stop loop if cancelled
+      
       if (currentStep >= 5) {
         submitEnrollment(tempImages);
         return;
@@ -97,18 +113,24 @@ export default function Students() {
           image_base64: b64
         });
         
+        if (abortCapture.current) return;
+
         if (res.data.status === 'SUCCESS') {
           // Face detected! Add it, and advance to next step.
           tempImages.push(b64);
           setImages([...tempImages]);
+          setValidationMsg('Face detected! Next step...');
           
           // Wait 1.5 seconds to give user time to read the NEXT instruction before snapping
           setTimeout(() => captureNextFrame(currentStep + 1), 1500);
         } else {
-          // No face detected (camera covered or bad angle). Try again in 500ms without advancing.
+          // No face detected (camera covered or bad angle)
+          setValidationMsg(res.data.message || 'No face detected. Please adjust lighting or angle.');
           setTimeout(() => captureNextFrame(currentStep), 500);
         }
-      } catch (err) {
+      } catch (err: any) {
+        if (abortCapture.current) return;
+        setValidationMsg(err.message || 'Network error analyzing frame.');
         setTimeout(() => captureNextFrame(currentStep), 500);
       }
     };
@@ -120,6 +142,7 @@ export default function Students() {
     if (!selectedStudent) return;
     
     setEnrollStatus('enrolling');
+    setValidationMsg('Building 128D Vector map...');
     try {
       await axios.post('http://localhost:8000/api/face/enroll', {
         student_id: selectedStudent.id,
@@ -204,7 +227,7 @@ export default function Students() {
       </Dialog>
 
       {/* Face Enrollment Dialog */}
-      <Dialog open={enrollModal} onClose={() => enrollStatus === 'idle' && setEnrollModal(false)} maxWidth="sm" fullWidth>
+      <Dialog open={enrollModal} onClose={cancelEnrollment} maxWidth="sm" fullWidth>
         <DialogTitle sx={{ textAlign: 'center', fontWeight: 'bold' }}>
           Biometric Enrollment
         </DialogTitle>
@@ -224,13 +247,9 @@ export default function Students() {
               videoConstraints={{ facingMode: "user", width: 1280, height: 720 }}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
             />
-            {/* Scanner Overlay */}
-            {enrollStatus === 'capturing' && (
-              <Box sx={{ position: 'absolute', inset: 0, background: 'linear-gradient(transparent 50%, rgba(14, 165, 233, 0.4) 50%)', backgroundSize: '100% 4px', animation: 'scan 2s linear infinite' }} />
-            )}
           </Box>
 
-          <Box sx={{ height: 60, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Box sx={{ height: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
             {enrollStatus === 'idle' && (
               <Button onClick={captureImagesForEnrollment} variant="contained" color="primary" size="large" sx={{ borderRadius: 8, px: 4, py: 1.5, fontWeight: 'bold' }}>
                 Begin Scan
@@ -238,13 +257,16 @@ export default function Students() {
             )}
             
             {enrollStatus === 'capturing' && (
-              <Typography variant="h6" fontWeight="bold" color="primary" sx={{ animation: 'pulse 1.5s infinite' }}>
-                {images.length === 0 && "1. Look straight at the camera"}
-                {images.length === 1 && "2. Turn your head slightly LEFT"}
-                {images.length === 2 && "3. Turn your head slightly RIGHT"}
-                {images.length === 3 && "4. Tilt your head slightly UP"}
-                {images.length === 4 && "5. Tilt your head slightly DOWN"}
-              </Typography>
+              <>
+                <Typography variant="h6" fontWeight="bold" color="primary" sx={{ mb: 1 }}>
+                  {images.length === 0 && "1. Look straight at the camera"}
+                  {images.length === 1 && "2. Turn your head slightly LEFT"}
+                  {images.length === 2 && "3. Turn your head slightly RIGHT"}
+                  {images.length === 3 && "4. Tilt your head slightly UP"}
+                  {images.length === 4 && "5. Tilt your head slightly DOWN"}
+                </Typography>
+                <Typography variant="caption" color="error" fontWeight="bold">{validationMsg}</Typography>
+              </>
             )}
 
             {enrollStatus === 'enrolling' && (
@@ -254,6 +276,11 @@ export default function Students() {
             )}
           </Box>
         </DialogContent>
+        <DialogActions sx={{ justifyContent: 'center', pb: 3 }}>
+           <Button onClick={cancelEnrollment} variant="outlined" color="error" sx={{ borderRadius: 8, px: 4 }}>
+             Cancel Enrollment
+           </Button>
+        </DialogActions>
       </Dialog>
 
 

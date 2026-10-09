@@ -1,6 +1,3 @@
-git init
 git add .
-git commit -m "Initial commit"
-git branch -M main
-git remote add origin https://github.com/mhamzashahidw/facedetection.git
-git push -u origin main
+git commit -m "Update: Guided Face Enrollment UX, HD Webcam, and Real-time Frame Validation"
+git push
