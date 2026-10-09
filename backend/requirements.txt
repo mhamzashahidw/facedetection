@@ -1,0 +1,15 @@
+fastapi
+uvicorn[standard]
+sqlalchemy
+passlib
+bcrypt<4.0.0
+python-jose[cryptography]
+python-multipart
+opencv-python
+deepface
+numpy
+scikit-learn
+websockets
+pydantic
+email-validator
+tf-keras
