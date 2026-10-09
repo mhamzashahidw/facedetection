@@ -13,3 +13,4 @@ websockets
 pydantic
 email-validator
 tf-keras
+retina-face

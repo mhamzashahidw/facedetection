@@ -4,7 +4,7 @@ import base64
 from deepface import DeepFace
 
 class FaceRecognitionEngine:
-    def __init__(self, model_name="Facenet", detector_backend="ssd"):
+    def __init__(self, model_name="Facenet", detector_backend="retinaface"):
         self.model_name = model_name
         self.detector_backend = detector_backend
 

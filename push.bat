@@ -1,3 +1,3 @@
 git add .
-git commit -m "Fix: Switch detector backend from MTCNN to robust SSD"
+git commit -m "Fix: Replace failing SSD detector with RetinaFace"
 git push
