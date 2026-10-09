@@ -102,5 +102,5 @@ async def validate_frame(request: FrameValidationRequest):
         # Just check if we can extract a face
         face_engine.get_embedding(img)
         return {"status": "SUCCESS", "message": "Face detected"}
-    except ValueError as e:
+    except Exception as e:
         return {"status": "FAILED", "message": str(e)}
