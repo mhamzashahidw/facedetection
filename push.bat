@@ -1,3 +1,3 @@
 git add .
-git commit -m "Update: Guided Face Enrollment UX, HD Webcam, and Real-time Frame Validation"
+git commit -m "Fix: Switch detector backend from OpenCV to MTCNN"
 git push
