@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'theme.dart';
 import 'services/bridge_client.dart';
@@ -8,6 +9,7 @@ import 'screens/enrollment_screen.dart';
 import 'screens/attendance_logs_screen.dart';
 import 'screens/cloud_diagnostics_screen.dart';
 import 'screens/student_attendance_screen.dart';
+import 'screens/user_management_screen.dart';
 import 'screens/login_screen.dart';
 
 void main() {
@@ -17,7 +19,9 @@ void main() {
 
 class UniVisionDesktopApp extends StatelessWidget {
   final BridgeClient? client;
-  const UniVisionDesktopApp({super.key, this.client});
+  final File? rememberFile;
+
+  const UniVisionDesktopApp({super.key, this.client, this.rememberFile});
 
   @override
   Widget build(BuildContext context) {
@@ -25,14 +29,16 @@ class UniVisionDesktopApp extends StatelessWidget {
       title: 'UniVision — Biometric Classroom Station',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.darkTheme,
-      home: MainWorkstationView(client: client),
+      home: MainWorkstationView(client: client, rememberFile: rememberFile),
     );
   }
 }
 
 class MainWorkstationView extends StatefulWidget {
   final BridgeClient? client;
-  const MainWorkstationView({super.key, this.client});
+  final File? rememberFile;
+
+  const MainWorkstationView({super.key, this.client, this.rememberFile});
 
   @override
   State<MainWorkstationView> createState() => _MainWorkstationViewState();
@@ -85,7 +91,7 @@ class _MainWorkstationViewState extends State<MainWorkstationView> {
         // If not logged in, show the LoginScreen
         if (user == null) {
           _lastRole = null;
-          return LoginScreen(client: _client);
+          return LoginScreen(client: _client, rememberFile: widget.rememberFile);
         }
 
         final role = (user['role'] ?? 'admin').toString().toLowerCase();
@@ -123,6 +129,7 @@ class _MainWorkstationViewState extends State<MainWorkstationView> {
                             AttendanceLogsScreen(client: _client),     // 2
                             CloudDiagnosticsScreen(client: _client),   // 3
                             StudentAttendanceScreen(client: _client),  // 4
+                            UserManagementScreen(client: _client),     // 5
                           ],
                         ),
                       ),

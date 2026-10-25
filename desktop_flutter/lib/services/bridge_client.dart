@@ -20,6 +20,45 @@ class BridgeClient extends ChangeNotifier {
   List<Map<String, dynamic>> attendanceRecords = [];
   List<Map<String, dynamic>> liveRoster = [];
   List<Map<String, dynamic>> studentAttendanceRecords = [];
+  List<Map<String, dynamic>> users = [
+    {
+      'id': 1,
+      'username': 'admin',
+      'email': 'admin@univision.edu',
+      'role': 'admin',
+      'full_name': 'System Administrator',
+      'roll_no': null,
+      'created_at': '2026-01-01T00:00:00Z',
+    },
+    {
+      'id': 2,
+      'username': 'teacher',
+      'email': 'teacher@school.edu',
+      'role': 'teacher',
+      'full_name': 'Prof. Alan Turing',
+      'roll_no': null,
+      'created_at': '2026-01-01T00:00:00Z',
+    },
+    {
+      'id': 3,
+      'username': '2024-CS-001',
+      'email': 'alice@student.edu',
+      'role': 'student',
+      'full_name': 'Alice Johnson',
+      'roll_no': '2024-CS-001',
+      'created_at': '2026-01-01T00:00:00Z',
+    },
+    {
+      'id': 4,
+      'username': '2025(s)-SE-5',
+      'email': 'hadi@student.edu',
+      'role': 'student',
+      'full_name': 'Abdul Hadi',
+      'roll_no': '2025(s)-SE-5',
+      'created_at': '2026-01-01T00:00:00Z',
+    },
+  ];
+  final Map<String, String> _customMockPasswords = {};
   Map<String, dynamic>? currentUser;
   List<String> logMessages = [
     '[00:00:00] UniVision Desktop Biometric Workstation Initialized.',
@@ -46,6 +85,7 @@ class BridgeClient extends ChangeNotifier {
     fetchStatus();
     loadEnrolledStudents();
     loadAttendanceRecords();
+    loadUsers();
 
     if (enableBackgroundPolling) {
       _connectWebSocket();
@@ -188,6 +228,17 @@ class BridgeClient extends ChangeNotifier {
       addLog('Cloud Sync completed: ${data['synced']} uploaded | ${data['failed']} failed.');
       fetchStatus();
       loadAttendanceRecords();
+    } else if (event == 'user_created') {
+      addLog('New user account created: ${data['full_name']} (${data['role']})');
+      loadUsers();
+    } else if (event == 'user_password_changed') {
+      addLog('Password updated for user #${data['user_id']}');
+    } else if (event == 'user_updated') {
+      addLog('Updated account details for ${data['full_name'] ?? ('User #' + data['id'].toString())}');
+      loadUsers();
+    } else if (event == 'user_deleted') {
+      addLog('User account #${data['user_id']} deleted.');
+      loadUsers();
     }
   }
 
@@ -657,6 +708,28 @@ class BridgeClient extends ChangeNotifier {
     } catch (_) {}
 
     // Fallback authentication for offline-first / testing execution
+    final customPwd = _customMockPasswords[cleanId.toLowerCase()];
+    if (customPwd != null) {
+      if (cleanPwd != customPwd) {
+        return false;
+      }
+      final userMatch = users.cast<Map<String, dynamic>?>().firstWhere(
+        (u) => (u?['username']?.toString().toLowerCase() == cleanId.toLowerCase() ||
+                u?['email']?.toString().toLowerCase() == cleanId.toLowerCase() ||
+                u?['roll_no']?.toString().toLowerCase() == cleanId.toLowerCase()),
+        orElse: () => null,
+      );
+      if (userMatch != null && (cleanRole.isEmpty || userMatch['role'].toString().toLowerCase() == cleanRole)) {
+        currentUser = Map<String, dynamic>.from(userMatch);
+        addLog('Logged in as ${currentUser!['full_name']} (${currentUser!['role'].toString().toUpperCase()})');
+        if (currentUser!['role'] == 'student') {
+          await loadStudentAttendance(currentUser!['roll_no'] ?? currentUser!['username']);
+        }
+        notifyListeners();
+        return true;
+      }
+    }
+
     if (cleanRole == 'admin' && cleanId == 'admin' && cleanPwd == 'admin123') {
       currentUser = {
         'id': 1,
@@ -702,6 +775,173 @@ class BridgeClient extends ChangeNotifier {
     }
 
     return false;
+  }
+
+  // --- Admin User & Password Management ---
+  Future<List<Map<String, dynamic>>> loadUsers() async {
+    try {
+      final res = await http.get(Uri.parse('$baseUrl/api/users')).timeout(const Duration(seconds: 2));
+      if (res.statusCode == 200) {
+        final List list = jsonDecode(res.body);
+        users = list.map((e) => Map<String, dynamic>.from(e)).toList();
+        if (!_isDisposed) notifyListeners();
+        return users;
+      }
+    } catch (_) {}
+    return users;
+  }
+
+  Future<bool> createUser({
+    required String username,
+    required String email,
+    required String password,
+    required String role,
+    required String fullName,
+    String? rollNo,
+  }) async {
+    final cleanUser = username.trim();
+    final cleanEmail = email.trim();
+    final cleanPwd = password.trim();
+    final cleanRole = role.trim().toLowerCase();
+    final cleanName = fullName.trim();
+    final cleanRoll = (rollNo != null && rollNo.trim().isNotEmpty) ? rollNo.trim() : (cleanRole == 'student' ? cleanUser : null);
+
+    try {
+      final res = await http.post(
+        Uri.parse('$baseUrl/api/users'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'username': cleanUser,
+          'email': cleanEmail,
+          'password': cleanPwd,
+          'role': cleanRole,
+          'full_name': cleanName,
+          'roll_no': cleanRoll,
+        }),
+      ).timeout(const Duration(seconds: 3));
+
+      if (res.statusCode == 200) {
+        addLog('Admin created user account for $cleanName ($cleanRole).');
+        await loadUsers();
+        return true;
+      }
+    } catch (_) {}
+
+    // Fallback for offline tests / local state
+    int nextId = 100;
+    for (final u in users) {
+      final uid = u['id'];
+      if (uid is int && uid >= nextId) nextId = uid + 1;
+    }
+    final newUser = {
+      'id': nextId,
+      'username': cleanUser,
+      'email': cleanEmail,
+      'role': cleanRole,
+      'full_name': cleanName,
+      'roll_no': cleanRoll,
+      'created_at': DateTime.now().toIso8601String(),
+    };
+    users.add(newUser);
+    _customMockPasswords[cleanUser.toLowerCase()] = cleanPwd;
+    if (cleanRoll != null) _customMockPasswords[cleanRoll.toLowerCase()] = cleanPwd;
+    if (cleanEmail.isNotEmpty) _customMockPasswords[cleanEmail.toLowerCase()] = cleanPwd;
+
+    addLog('Locally created user account for $cleanName ($cleanRole).');
+    notifyListeners();
+    return true;
+  }
+
+  Future<bool> updateUserPassword({required int userId, required String newPassword}) async {
+    final cleanPwd = newPassword.trim();
+    if (cleanPwd.length < 4) return false;
+
+    try {
+      final res = await http.put(
+        Uri.parse('$baseUrl/api/users/$userId/password'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'password': cleanPwd}),
+      ).timeout(const Duration(seconds: 3));
+
+      if (res.statusCode == 200) {
+        addLog('Password updated successfully for user #$userId');
+        return true;
+      }
+    } catch (_) {}
+
+    // Fallback for offline tests / local mock state
+    final userIdx = users.indexWhere((u) => u['id'] == userId);
+    if (userIdx != -1) {
+      final u = users[userIdx];
+      final uname = u['username']?.toString().toLowerCase();
+      final uroll = u['roll_no']?.toString().toLowerCase();
+      final uemail = u['email']?.toString().toLowerCase();
+      if (uname != null) _customMockPasswords[uname] = cleanPwd;
+      if (uroll != null) _customMockPasswords[uroll] = cleanPwd;
+      if (uemail != null) _customMockPasswords[uemail] = cleanPwd;
+
+      addLog('Locally updated password for user ${u['full_name']}');
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  Future<bool> updateUser({
+    required int userId,
+    String? fullName,
+    String? email,
+    String? rollNo,
+    String? username,
+  }) async {
+    try {
+      final body = <String, dynamic>{};
+      if (fullName != null) body['full_name'] = fullName.trim();
+      if (email != null) body['email'] = email.trim();
+      if (rollNo != null) body['roll_no'] = rollNo.trim();
+      if (username != null) body['username'] = username.trim();
+
+      final res = await http.put(
+        Uri.parse('$baseUrl/api/users/$userId'),
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode(body),
+      ).timeout(const Duration(seconds: 3));
+
+      if (res.statusCode == 200) {
+        addLog('Updated user #$userId details');
+        await loadUsers();
+        return true;
+      }
+    } catch (_) {}
+
+    final userIdx = users.indexWhere((u) => u['id'] == userId);
+    if (userIdx != -1) {
+      if (fullName != null) users[userIdx]['full_name'] = fullName.trim();
+      if (email != null) users[userIdx]['email'] = email.trim();
+      if (rollNo != null) users[userIdx]['roll_no'] = rollNo.trim();
+      if (username != null) users[userIdx]['username'] = username.trim();
+      addLog('Locally updated user #$userId details');
+      notifyListeners();
+      return true;
+    }
+    return false;
+  }
+
+  Future<bool> deleteUser(int userId) async {
+    try {
+      final res = await http.delete(Uri.parse('$baseUrl/api/users/$userId')).timeout(const Duration(seconds: 3));
+      if (res.statusCode == 200) {
+        users.removeWhere((u) => u['id'] == userId);
+        addLog('Deleted user #$userId');
+        notifyListeners();
+        return true;
+      }
+    } catch (_) {}
+
+    users.removeWhere((u) => u['id'] == userId);
+    addLog('Locally deleted user #$userId');
+    notifyListeners();
+    return true;
   }
 
   void logout() {

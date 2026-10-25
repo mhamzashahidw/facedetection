@@ -1,4 +1,32 @@
-from PySide6.QtCore import QObject, Signal
+try:
+    from PySide6.QtCore import QObject, Signal
+except ImportError:
+    class Signal:
+        """Pure-Python Signal implementation matching Qt Signal semantics."""
+        def __init__(self, *arg_types):
+            self._slots = []
+
+        def connect(self, slot):
+            if slot not in self._slots:
+                self._slots.append(slot)
+
+        def disconnect(self, slot=None):
+            if slot is None:
+                self._slots.clear()
+            elif slot in self._slots:
+                self._slots.remove(slot)
+
+        def emit(self, *args, **kwargs):
+            for slot in list(self._slots):
+                try:
+                    slot(*args, **kwargs)
+                except Exception as e:
+                    import logging
+                    logging.getLogger("EventBus").exception(f"Error in signal slot: {e}")
+
+    class QObject:
+        pass
+
 
 class DesktopEventBus(QObject):
     """

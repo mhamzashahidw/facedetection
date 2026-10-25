@@ -222,6 +222,8 @@ class Sidebar extends StatelessWidget {
         _buildNavItem(0, 'Live Monitoring', Icons.videocam_rounded),
         const SizedBox(height: 6),
         _buildNavItem(3, 'Cloud & Diagnostics', Icons.cloud_sync_rounded),
+        const SizedBox(height: 6),
+        _buildNavItem(5, 'User & Passwords', Icons.admin_panel_settings_rounded),
       ];
     } else if (role == 'teacher') {
       return [
@@ -243,6 +245,8 @@ class Sidebar extends StatelessWidget {
       _buildNavItem(2, 'Attendance Logs', Icons.format_list_bulleted_rounded),
       const SizedBox(height: 6),
       _buildNavItem(3, 'Cloud & Diagnostics', Icons.cloud_sync_rounded),
+      const SizedBox(height: 6),
+      _buildNavItem(5, 'User & Passwords', Icons.admin_panel_settings_rounded),
     ];
   }
 

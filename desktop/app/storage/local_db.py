@@ -1,5 +1,7 @@
 import sqlite3
 import os
+import sys
+import shutil
 import json
 import numpy as np
 from datetime import datetime, timezone
@@ -13,8 +15,28 @@ class LocalStorage:
     """
     def __init__(self, db_path: Optional[str] = None):
         if db_path is None:
-            base_dir = os.path.dirname(os.path.abspath(__file__))
-            db_path = os.path.join(base_dir, "desktop_attendance.db")
+            if getattr(sys, 'frozen', False):
+                app_data = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or os.path.expanduser("~")
+                db_dir = os.path.join(app_data, "UniVision")
+                os.makedirs(db_dir, exist_ok=True)
+                db_path = os.path.join(db_dir, "desktop_attendance.db")
+                if not os.path.exists(db_path):
+                    base_dir = getattr(sys, '_MEIPASS', os.path.dirname(os.path.abspath(__file__)))
+                    candidates = [
+                        os.path.join(base_dir, "desktop", "app", "storage", "desktop_attendance.db"),
+                        os.path.join(base_dir, "app", "storage", "desktop_attendance.db"),
+                        os.path.join(base_dir, "desktop_attendance.db"),
+                    ]
+                    for c in candidates:
+                        if os.path.exists(c):
+                            try:
+                                shutil.copy2(c, db_path)
+                                break
+                            except Exception:
+                                pass
+            else:
+                base_dir = os.path.dirname(os.path.abspath(__file__))
+                db_path = os.path.join(base_dir, "desktop_attendance.db")
         self.db_path = db_path
         self._init_db()
 
@@ -173,9 +195,9 @@ class LocalStorage:
 
             user_dict = dict(user_row)
 
-            # Check password (allow default "student123" or student's roll number if student)
+            # Check password
             pw_ok = self.verify_user_password(clean_pwd, user_dict["password_hash"])
-            if not pw_ok and user_dict["role"] == "student":
+            if not pw_ok and user_dict["role"] == "student" and user_dict["password_hash"] == self.hash_password("student123"):
                 if clean_pwd == "student123" or (user_dict.get("roll_no") and clean_pwd.lower() == user_dict["roll_no"].lower()):
                     pw_ok = True
 
@@ -201,6 +223,105 @@ class LocalStorage:
             cursor = conn.cursor()
             cursor.execute("SELECT id, username, email, role, full_name, roll_no, created_at FROM app_users ORDER BY id ASC")
             return [dict(row) for row in cursor.fetchall()]
+
+    def get_user_by_id(self, user_id: int) -> Optional[dict]:
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT id, username, email, role, full_name, roll_no, created_at FROM app_users WHERE id = ?", (user_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def create_user(self, username: str, email: str, password: str, role: str, full_name: str, roll_no: Optional[str] = None) -> dict:
+        clean_user = username.strip()
+        clean_email = email.strip()
+        clean_pwd = password.strip()
+        clean_role = role.strip().lower()
+        clean_name = full_name.strip()
+        clean_roll = roll_no.strip() if roll_no else (clean_user if clean_role == 'student' else None)
+        
+        now_str = datetime.now(timezone.utc).isoformat()
+        pwd_hash = self.hash_password(clean_pwd)
+
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            # Check existing username or email
+            cursor.execute("SELECT id FROM app_users WHERE LOWER(username) = LOWER(?) OR LOWER(email) = LOWER(?)", (clean_user, clean_email))
+            if cursor.fetchone():
+                raise ValueError("A user with this username or email already exists")
+
+            cursor.execute("""
+            INSERT INTO app_users (username, email, password_hash, role, full_name, roll_no, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+            """, (clean_user, clean_email, pwd_hash, clean_role, clean_name, clean_roll, now_str))
+            new_id = cursor.lastrowid
+            conn.commit()
+
+            return {
+                "id": new_id,
+                "username": clean_user,
+                "email": clean_email,
+                "role": clean_role,
+                "full_name": clean_name,
+                "roll_no": clean_roll,
+                "created_at": now_str
+            }
+
+    def update_user_password(self, user_id: int, new_password: str) -> bool:
+        clean_pwd = new_password.strip()
+        if len(clean_pwd) < 4:
+            raise ValueError("Password must be at least 4 characters long")
+
+        pwd_hash = self.hash_password(clean_pwd)
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("UPDATE app_users SET password_hash = ? WHERE id = ?", (pwd_hash, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def update_user(self, user_id: int, full_name: Optional[str] = None, email: Optional[str] = None, roll_no: Optional[str] = None, username: Optional[str] = None) -> bool:
+        updates = []
+        params = []
+        if full_name is not None and full_name.strip():
+            updates.append("full_name = ?")
+            params.append(full_name.strip())
+        if email is not None and email.strip():
+            updates.append("email = ?")
+            params.append(email.strip())
+        if roll_no is not None and roll_no.strip():
+            updates.append("roll_no = ?")
+            params.append(roll_no.strip())
+        if username is not None and username.strip():
+            updates.append("username = ?")
+            params.append(username.strip())
+
+        if not updates:
+            return False
+
+        params.append(user_id)
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"UPDATE app_users SET {', '.join(updates)} WHERE id = ?", params)
+            if cursor.rowcount > 0:
+                conn.commit()
+                # If roll_no or full_name changed, cascade to enrolled_students if student
+                cursor.execute("SELECT role, roll_no, full_name FROM app_users WHERE id = ?", (user_id,))
+                user_info = cursor.fetchone()
+                if user_info and user_info[0] == 'student':
+                    rno = user_info[1]
+                    fname = user_info[2]
+                    conn.execute("UPDATE enrolled_students SET full_name = ? WHERE LOWER(roll_no) = LOWER(?)", (fname, rno))
+                    conn.execute("UPDATE attendance_queue SET full_name = ? WHERE LOWER(roll_no) = LOWER(?)", (fname, rno))
+                    conn.commit()
+                return True
+            return False
+
+    def delete_user(self, user_id: int) -> bool:
+        with self._get_conn() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM app_users WHERE id = ?", (user_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
     # --- Student Biometrics Enrollment ---
     def save_enrolled_student(self, student_id: int, roll_no: str, full_name: str, embedding: np.ndarray):
@@ -297,6 +418,26 @@ class LocalStorage:
                     att_params.append(str(full_name).strip())
                 att_params.append(student_id)
                 conn.execute(f"UPDATE attendance_queue SET {', '.join(att_updates)} WHERE student_id = ?", att_params)
+
+                # Cascade to app_users if student account exists
+                cursor.execute("SELECT roll_no FROM enrolled_students WHERE student_id = ?", (student_id,))
+                current_rno = cursor.fetchone()
+                if current_rno:
+                    rno_val = current_rno[0]
+                    usr_updates = []
+                    usr_params = []
+                    if full_name is not None and str(full_name).strip():
+                        usr_updates.append("full_name = ?")
+                        usr_params.append(str(full_name).strip())
+                    if roll_no is not None and str(roll_no).strip():
+                        usr_updates.append("roll_no = ?")
+                        usr_params.append(str(roll_no).strip())
+                        usr_updates.append("username = ?")
+                        usr_params.append(str(roll_no).strip())
+                    if usr_updates:
+                        usr_params.append(rno_val)
+                        conn.execute(f"UPDATE app_users SET {', '.join(usr_updates)} WHERE LOWER(roll_no) = LOWER(?) OR LOWER(username) = LOWER(?)", usr_params + [rno_val])
+
                 conn.commit()
                 return True
             return False
@@ -317,6 +458,20 @@ class LocalStorage:
         now_str = datetime.now(timezone.utc).isoformat()
         with self._get_conn() as conn:
             conn.execute("UPDATE local_sessions SET ended_at = ? WHERE id = ?", (now_str, local_session_id))
+            conn.commit()
+
+    def get_local_session(self, local_session_id: int) -> Optional[dict]:
+        with self._get_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.cursor()
+            cursor.execute("SELECT * FROM local_sessions WHERE id = ?", (local_session_id,))
+            row = cursor.fetchone()
+            return dict(row) if row else None
+
+    def update_local_session_cloud_id(self, local_session_id: int, cloud_session_id: int):
+        with self._get_conn() as conn:
+            conn.execute("UPDATE local_sessions SET cloud_session_id = ? WHERE id = ?", (cloud_session_id, local_session_id))
+            conn.execute("UPDATE attendance_queue SET cloud_session_id = ? WHERE local_session_id = ?", (cloud_session_id, local_session_id))
             conn.commit()
 
     # --- Attendance Queue (Offline-First) ---

@@ -20,7 +20,8 @@ desktop/app/storage/*.db
 # PyInstaller / Build
 dist/
 build/
-*.spec
+packaging/build/
+packaging/dist/
 
 # Flutter / Mobile & Desktop
 mobile/.dart_tool/
@@ -38,6 +39,11 @@ desktop_flutter/.packages
 desktop_flutter/build/
 desktop_flutter/.pub/
 desktop_flutter/.pub-cache/
+
+# User credentials cache & tests
+remembered_user.json
+test_remembered_user.json
+.pytest_cache/
 
 # OS and Editor artifacts
 .DS_Store

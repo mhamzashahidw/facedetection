@@ -68,12 +68,28 @@ class CloudSyncClient:
         if not self.token:
             return {"synced": 0, "failed": len(pending), "pending": len(pending), "error": "Not authenticated"}
 
-        # Group by cloud_session_id
+        # Group by cloud_session_id and resolve offline sessions
         session_groups: Dict[int, List[dict]] = {}
         no_session_ids = []
+        resolved_sessions: Dict[int, int] = {}
 
         for r in pending:
             csid = r.get("cloud_session_id")
+            lsid = r.get("local_session_id")
+            if not csid and lsid:
+                if lsid in resolved_sessions:
+                    csid = resolved_sessions[lsid]
+                    r["cloud_session_id"] = csid
+                else:
+                    lsess = self.local_storage.get_local_session(lsid)
+                    course_id = lsess.get("course_id", 1) if lsess else 1
+                    new_csid = self.create_cloud_session(course_id)
+                    if new_csid:
+                        self.local_storage.update_local_session_cloud_id(lsid, new_csid)
+                        resolved_sessions[lsid] = new_csid
+                        csid = new_csid
+                        r["cloud_session_id"] = csid
+
             if csid:
                 session_groups.setdefault(csid, []).append(r)
             else:

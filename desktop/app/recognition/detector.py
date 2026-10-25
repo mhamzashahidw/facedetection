@@ -1,4 +1,5 @@
 import os
+import sys
 import cv2
 import numpy as np
 from typing import List, Tuple, Optional
@@ -10,8 +11,16 @@ class YuNetDetector:
     """
     def __init__(self, model_path: Optional[str] = None, conf_threshold: float = 0.6, nms_threshold: float = 0.3):
         if model_path is None:
-            base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-            model_path = os.path.join(base_dir, "models", "face_detection_yunet_2023mar.onnx")
+            if hasattr(sys, '_MEIPASS'):
+                base_dir = getattr(sys, '_MEIPASS')
+                candidates = [
+                    os.path.join(base_dir, "models", "face_detection_yunet_2023mar.onnx"),
+                    os.path.join(base_dir, "desktop", "models", "face_detection_yunet_2023mar.onnx"),
+                ]
+                model_path = next((c for c in candidates if os.path.exists(c)), candidates[0])
+            else:
+                base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+                model_path = os.path.join(base_dir, "models", "face_detection_yunet_2023mar.onnx")
 
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"YuNet ONNX model not found at {model_path}")

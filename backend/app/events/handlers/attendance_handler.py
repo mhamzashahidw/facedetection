@@ -43,9 +43,11 @@ async def handle_batch_attendance(payload: dict):
                 att_record = existing
             else:
                 marked_at_raw = rec.get("marked_at")
-                if marked_at_raw:
+                if isinstance(marked_at_raw, datetime):
+                    marked_time = marked_at_raw
+                elif marked_at_raw:
                     try:
-                        marked_time = datetime.fromisoformat(marked_at_raw.replace("Z", "+00:00"))
+                        marked_time = datetime.fromisoformat(str(marked_at_raw).replace("Z", "+00:00"))
                     except Exception:
                         marked_time = datetime.now(timezone.utc)
                 else:

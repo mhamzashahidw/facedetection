@@ -11,12 +11,45 @@ class TeacherLogin(BaseModel):
     email: EmailStr
     password: str
 
+class AdminLogin(BaseModel):
+    username_or_email: str
+    password: str
+
 class Token(BaseModel):
     access_token: str
     token_type: str = "bearer"
     role: str
     user_id: int
     full_name: str
+
+# --- User Management Schemas ---
+class UserOut(BaseModel):
+    id: int
+    username: str
+    email: Optional[str] = None
+    full_name: str
+    role: str
+    roll_no: Optional[str] = None
+    created_at: Optional[datetime] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class UserCreate(BaseModel):
+    username: str
+    email: Optional[EmailStr] = None
+    password: str
+    full_name: str
+    role: str # 'student', 'teacher', or 'admin'
+    roll_no: Optional[str] = None
+
+class UserUpdate(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[EmailStr] = None
+    roll_no: Optional[str] = None
+    username: Optional[str] = None
+
+class PasswordUpdate(BaseModel):
+    new_password: str
 
 # --- Session Schemas ---
 class SessionCreate(BaseModel):

@@ -8,6 +8,7 @@ import sys
 import threading
 import time
 from datetime import datetime
+from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any
 import cv2
 import numpy as np
@@ -44,7 +45,22 @@ except ImportError:
     from app.events.event_bus import desktop_event_bus
 
 logger = logging.getLogger("DesktopBridge")
-app = FastAPI(title="UniVision Desktop Bridge API", version="2.0.0")
+
+# Active WebSocket connections
+active_connections: List[WebSocket] = []
+main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    global main_loop
+    main_loop = asyncio.get_running_loop()
+    logger.info("Bridge service started. Main async loop captured.")
+    yield
+    if 'ai_camera_engine' in globals():
+        ai_camera_engine.stop_camera()
+    logger.info("Bridge service shutdown cleanly.")
+
+app = FastAPI(title="UniVision Desktop Bridge API", version="2.0.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -71,21 +87,6 @@ try:
     logger.info("YuNet and SFace ONNX neural models loaded successfully.")
 except Exception as e:
     logger.warning(f"ONNX models could not be loaded into memory: {e}")
-
-# Active WebSocket connections
-active_connections: List[WebSocket] = []
-main_loop: Optional[asyncio.AbstractEventLoop] = None
-
-@app.on_event("startup")
-async def startup_event():
-    global main_loop
-    main_loop = asyncio.get_running_loop()
-    logger.info("Bridge service started. Main async loop captured.")
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    ai_camera_engine.stop_camera()
-    logger.info("Bridge service shutdown cleanly.")
 
 async def broadcast_event(event_type: str, data: dict):
     payload = json.dumps({"event": event_type, "data": data, "timestamp": time.time()})
@@ -451,6 +452,23 @@ class UpdateStudentReq(BaseModel):
     roll_no: Optional[str] = None
     full_name: Optional[str] = None
 
+class CreateUserReq(BaseModel):
+    username: str
+    email: str
+    password: str
+    role: str
+    full_name: str
+    roll_no: Optional[str] = None
+
+class UpdateUserPasswordReq(BaseModel):
+    password: str
+
+class UpdateUserReq(BaseModel):
+    full_name: Optional[str] = None
+    email: Optional[str] = None
+    roll_no: Optional[str] = None
+    username: Optional[str] = None
+
 @app.get("/api/status")
 async def get_status():
     enrolled = storage.list_enrolled_students()
@@ -651,10 +669,18 @@ async def delete_record(record_id: int):
         return {"status": "DELETED", "record_id": record_id}
     raise HTTPException(status_code=404, detail="Record not found")
 
-@app.post("/api/records/export")
-async def export_csv(session_id: Optional[int] = None, target_file: Optional[str] = None):
+def _get_export_dir() -> str:
+    if getattr(sys, 'frozen', False):
+        user_docs = os.path.join(os.environ.get("USERPROFILE", os.path.expanduser("~")), "Documents", "UniVision", "Exports")
+        os.makedirs(user_docs, exist_ok=True)
+        return user_docs
     export_dir = os.path.join(desktop_dir, "exports")
     os.makedirs(export_dir, exist_ok=True)
+    return export_dir
+
+@app.post("/api/records/export")
+async def export_csv(session_id: Optional[int] = None, target_file: Optional[str] = None):
+    export_dir = _get_export_dir()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     
     if session_id:
@@ -706,14 +732,72 @@ async def login_user(req: LoginReq):
         return {"success": True, "user": user}
     raise HTTPException(status_code=401, detail="Invalid credentials")
 
+# --- User Management Endpoints (Admin) ---
+@app.get("/api/users")
+async def list_users():
+    return storage.list_users()
+
+@app.post("/api/users")
+async def create_user(req: CreateUserReq):
+    try:
+        user = storage.create_user(
+            username=req.username,
+            email=req.email,
+            password=req.password,
+            role=req.role,
+            full_name=req.full_name,
+            roll_no=req.roll_no
+        )
+        await broadcast_event("user_created", user)
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.put("/api/users/{user_id}/password")
+async def update_user_password(user_id: int, req: UpdateUserPasswordReq):
+    try:
+        ok = storage.update_user_password(user_id, req.password)
+        if ok:
+            user = storage.get_user_by_id(user_id)
+            await broadcast_event("user_password_changed", {
+                "user_id": user_id,
+                "username": user.get("username") if user else ""
+            })
+            return {"status": "SUCCESS", "message": "Password updated successfully"}
+        raise HTTPException(status_code=404, detail="User not found")
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+@app.put("/api/users/{user_id}")
+async def update_user(user_id: int, req: UpdateUserReq):
+    ok = storage.update_user(
+        user_id,
+        full_name=req.full_name,
+        email=req.email,
+        roll_no=req.roll_no,
+        username=req.username
+    )
+    if ok:
+        user = storage.get_user_by_id(user_id)
+        await broadcast_event("user_updated", user or {"user_id": user_id})
+        return {"status": "UPDATED", "user": user}
+    raise HTTPException(status_code=404, detail="User not found or nothing to update")
+
+@app.delete("/api/users/{user_id}")
+async def delete_user(user_id: int):
+    ok = storage.delete_user(user_id)
+    if ok:
+        await broadcast_event("user_deleted", {"user_id": user_id})
+        return {"status": "DELETED", "user_id": user_id}
+    raise HTTPException(status_code=404, detail="User not found")
+
 @app.get("/api/student/attendance")
 async def get_student_attendance(roll_no: Optional[str] = None, student_id: Optional[int] = None):
     return storage.get_attendance_for_student(roll_no=roll_no, student_id=student_id)
 
 @app.post("/api/student/attendance/export")
 async def export_student_attendance(roll_no: str):
-    export_dir = os.path.join(desktop_dir, "exports")
-    os.makedirs(export_dir, exist_ok=True)
+    export_dir = _get_export_dir()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     clean_roll = roll_no.replace('/', '_').replace('(', '').replace(')', '')
     target_file = os.path.join(export_dir, f"attendance_{clean_roll}_{timestamp}.csv")

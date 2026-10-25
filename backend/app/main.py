@@ -5,7 +5,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from .database import engine
 from .models import Base
-from .routers import auth, sessions, attendance, students
+from .routers import auth, sessions, attendance, students, admin
 from .events.event_bus import event_bus
 # Import handlers so they register their subscriptions with event_bus
 from .events import handlers
@@ -47,8 +47,10 @@ app.include_router(auth.router)
 app.include_router(sessions.router)
 app.include_router(attendance.router)
 app.include_router(students.router)
+app.include_router(admin.router)
 
 @app.get("/")
+@app.get("/health")
 def health_check():
     return {
         "status": "healthy",

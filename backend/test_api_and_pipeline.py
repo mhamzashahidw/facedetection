@@ -188,3 +188,90 @@ def test_student_self_service_attendance_and_summary():
     if summaries:
         assert "attendance_percentage" in summaries[0]
         assert "is_below_threshold" in summaries[0]
+
+def test_admin_user_and_password_management():
+    # 1. Admin Login
+    admin_res = client.post("/auth/admin/login", json={
+        "username_or_email": "admin",
+        "password": "admin123"
+    })
+    assert admin_res.status_code == 200
+    admin_token = admin_res.json()["access_token"]
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+
+    # 2. List all users
+    users_res = client.get("/admin/users", headers=admin_headers)
+    assert users_res.status_code == 200
+    users = users_res.json()
+    assert len(users) >= 4 # admin + teacher + 3 students
+    roles = {u["role"] for u in users}
+    assert "admin" in roles and "teacher" in roles and "student" in roles
+
+    # 3. Admin creates a new student with password
+    create_st_res = client.post("/admin/users", json={
+        "username": "2026-CS-999",
+        "roll_no": "2026-CS-999",
+        "full_name": "Test Managed Student",
+        "email": "managed_student@school.edu",
+        "role": "student",
+        "password": "initial_password_123"
+    }, headers=admin_headers)
+    assert create_st_res.status_code == 201
+    new_st = create_st_res.json()
+    st_id = new_st["id"]
+
+    # Verify student can login with initial password
+    st_login = client.post("/auth/student/login", json={
+        "roll_no": "2026-CS-999",
+        "password": "initial_password_123"
+    })
+    assert st_login.status_code == 200
+
+    # 4. Admin edits/updates password for this student
+    pwd_update_res = client.put(f"/admin/users/student/{st_id}/password", json={
+        "new_password": "super_secret_updated_pwd"
+    }, headers=admin_headers)
+    assert pwd_update_res.status_code == 200
+    assert pwd_update_res.json()["status"] == "SUCCESS"
+
+    # Verify old password fails
+    old_fail = client.post("/auth/student/login", json={
+        "roll_no": "2026-CS-999",
+        "password": "initial_password_123"
+    })
+    assert old_fail.status_code == 401
+
+    # Verify new password succeeds immediately
+    new_ok = client.post("/auth/student/login", json={
+        "roll_no": "2026-CS-999",
+        "password": "super_secret_updated_pwd"
+    })
+    assert new_ok.status_code == 200
+
+    # 5. Admin edits/updates password for teacher
+    db = SessionLocal()
+    teacher = db.query(Teacher).filter(Teacher.email == "teacher@school.edu").first()
+    t_id = teacher.id
+    db.close()
+
+    t_pwd_res = client.put(f"/admin/users/teacher/{t_id}/password", json={
+        "new_password": "teacher_new_secure_pwd"
+    }, headers=admin_headers)
+    assert t_pwd_res.status_code == 200
+
+    # Verify teacher can login with new password
+    t_login = client.post("/auth/teacher/login", json={
+        "email": "teacher@school.edu",
+        "password": "teacher_new_secure_pwd"
+    })
+    assert t_login.status_code == 200
+
+    # Reset teacher password back to default for other tests
+    client.put(f"/admin/users/teacher/{t_id}/password", json={
+        "new_password": "teacher123"
+    }, headers=admin_headers)
+
+    # 6. Cleanup created test student
+    del_res = client.delete(f"/admin/users/student/{st_id}", headers=admin_headers)
+    assert del_res.status_code == 200
+

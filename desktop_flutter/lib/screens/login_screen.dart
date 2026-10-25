@@ -1,11 +1,14 @@
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import '../theme.dart';
 import '../services/bridge_client.dart';
 
 class LoginScreen extends StatefulWidget {
   final BridgeClient client;
+  final File? rememberFile;
 
-  const LoginScreen({super.key, required this.client});
+  const LoginScreen({super.key, required this.client, this.rememberFile});
 
   @override
   State<LoginScreen> createState() => _LoginScreenState();
@@ -13,10 +16,38 @@ class LoginScreen extends StatefulWidget {
 
 class _LoginScreenState extends State<LoginScreen> {
   String _activeRole = 'admin';
-  final TextEditingController _idCtrl = TextEditingController(text: 'admin');
-  final TextEditingController _pwdCtrl = TextEditingController(text: 'admin123');
+  final TextEditingController _idCtrl = TextEditingController();
+  final TextEditingController _pwdCtrl = TextEditingController();
   String? _errorMessage;
   bool _isLoading = false;
+  bool _rememberMe = false;
+  bool _obscurePassword = true;
+
+  File get _rememberFile => widget.rememberFile ?? File('remembered_user.json');
+
+  @override
+  void initState() {
+    super.initState();
+    _loadRememberedCredentials();
+  }
+
+  void _loadRememberedCredentials() {
+    try {
+      final file = _rememberFile;
+      if (file.existsSync()) {
+        final content = file.readAsStringSync();
+        if (content.trim().isNotEmpty) {
+          final data = jsonDecode(content);
+          if (data is Map<String, dynamic> && data['remember'] == true) {
+            _rememberMe = true;
+            if (data['role'] != null) _activeRole = data['role'].toString();
+            if (data['identifier'] != null) _idCtrl.text = data['identifier'].toString();
+            if (data['password'] != null) _pwdCtrl.text = data['password'].toString();
+          }
+        }
+      }
+    } catch (_) {}
+  }
 
   @override
   void dispose() {
@@ -29,16 +60,6 @@ class _LoginScreenState extends State<LoginScreen> {
     setState(() {
       _activeRole = role;
       _errorMessage = null;
-      if (role == 'admin') {
-        _idCtrl.text = 'admin';
-        _pwdCtrl.text = 'admin123';
-      } else if (role == 'teacher') {
-        _idCtrl.text = 'teacher';
-        _pwdCtrl.text = 'teacher123';
-      } else if (role == 'student') {
-        _idCtrl.text = '2025(s)-SE-5';
-        _pwdCtrl.text = 'student123';
-      }
     });
   }
 
@@ -62,21 +83,37 @@ class _LoginScreenState extends State<LoginScreen> {
       role: _activeRole,
     );
 
+    if (success) {
+      // Handle Remember Me persistence synchronously and atomically
+      try {
+        final file = _rememberFile;
+        if (_rememberMe) {
+          file.writeAsStringSync(
+            jsonEncode({
+              'remember': true,
+              'role': _activeRole,
+              'identifier': id,
+              'password': pwd,
+            }),
+            flush: true,
+          );
+        } else {
+          if (file.existsSync()) {
+            file.deleteSync();
+          }
+        }
+      } catch (_) {}
+    }
+
     if (!mounted) return;
 
     setState(() {
       _isLoading = false;
       if (!success) {
-        _errorMessage = 'Invalid credentials for ${_activeRole[0].toUpperCase()}${_activeRole.substring(1)}. Please check your details.';
+        _errorMessage =
+            'Invalid credentials for ${_activeRole[0].toUpperCase()}${_activeRole.substring(1)}. Please check your details.';
       }
     });
-  }
-
-  void _quickDemo(String role, String id, String pwd) {
-    _selectRole(role);
-    _idCtrl.text = id;
-    _pwdCtrl.text = pwd;
-    _submitLogin();
   }
 
   @override
@@ -199,12 +236,62 @@ class _LoginScreenState extends State<LoginScreen> {
                 const SizedBox(height: 6),
                 TextField(
                   controller: _pwdCtrl,
-                  obscureText: true,
-                  decoration: const InputDecoration(
+                  obscureText: _obscurePassword,
+                  decoration: InputDecoration(
                     hintText: 'Enter account password',
-                    prefixIcon: Icon(Icons.lock_outline_rounded, color: AppTheme.textMuted, size: 18),
+                    prefixIcon: const Icon(Icons.lock_outline_rounded, color: AppTheme.textMuted, size: 18),
+                    suffixIcon: IconButton(
+                      icon: Icon(
+                        _obscurePassword ? Icons.visibility_off_rounded : Icons.visibility_rounded,
+                        color: AppTheme.textMuted,
+                        size: 18,
+                      ),
+                      onPressed: () => setState(() => _obscurePassword = !_obscurePassword),
+                    ),
                   ),
                   onSubmitted: (_) => _submitLogin(),
+                ),
+                const SizedBox(height: 10),
+
+                // Remember Me Checkbox
+                Row(
+                  children: [
+                    SizedBox(
+                      width: 24,
+                      height: 24,
+                      child: Checkbox(
+                        value: _rememberMe,
+                        activeColor: _getRoleColor(),
+                        checkColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                        side: const BorderSide(color: AppTheme.border, width: 1.5),
+                        onChanged: (val) {
+                          setState(() => _rememberMe = val ?? false);
+                        },
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    GestureDetector(
+                      onTap: () => setState(() => _rememberMe = !_rememberMe),
+                      child: const Text(
+                        'Remember Me',
+                        style: TextStyle(
+                          color: AppTheme.textPrimary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ),
+                    const Spacer(),
+                    Text(
+                      'Station Secured',
+                      style: TextStyle(
+                        color: AppTheme.textMuted.withValues(alpha: 0.7),
+                        fontSize: 11,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
+                  ],
                 ),
 
                 // Error Message Banner
@@ -231,6 +318,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _getRoleColor(),
                     padding: const EdgeInsets.symmetric(vertical: 14),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                   ),
                   onPressed: _isLoading ? null : _submitLogin,
                   child: _isLoading
@@ -249,56 +337,28 @@ class _LoginScreenState extends State<LoginScreen> {
                         ),
                 ),
 
-                const SizedBox(height: 20),
+                const SizedBox(height: 16),
 
-                // 1-Click Demo Access
-                const Center(
-                  child: Text(
-                    '— OR 1-CLICK DEMO ACCESS —',
-                    style: TextStyle(
-                      color: AppTheme.textMuted,
-                      fontSize: 10,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1,
-                    ),
+                // Helpful Security / System Hint
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: AppTheme.surfaceSunken,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: AppTheme.border),
                   ),
-                ),
-                const SizedBox(height: 10),
-                Row(
-                  children: [
-                    Expanded(
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          textStyle: const TextStyle(fontSize: 11),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.shield_outlined, size: 15, color: AppTheme.textMuted),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Text(
+                          _getSystemHelperHint(),
+                          style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
                         ),
-                        onPressed: () => _quickDemo('admin', 'admin', 'admin123'),
-                        child: const Text('Demo Admin'),
                       ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          textStyle: const TextStyle(fontSize: 11),
-                        ),
-                        onPressed: () => _quickDemo('teacher', 'teacher', 'teacher123'),
-                        child: const Text('Demo Teacher'),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: OutlinedButton(
-                        style: OutlinedButton.styleFrom(
-                          padding: const EdgeInsets.symmetric(vertical: 8),
-                          textStyle: const TextStyle(fontSize: 11),
-                        ),
-                        onPressed: () => _quickDemo('student', '2025(s)-SE-5', 'student123'),
-                        child: const Text('Demo Student'),
-                      ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -375,7 +435,7 @@ class _LoginScreenState extends State<LoginScreen> {
   String _getRoleDescription() {
     switch (_activeRole) {
       case 'admin':
-        return 'Admin Console: View all attendance logs and enroll students via biometrics.';
+        return 'Admin Console: Manage users, edit passwords, view logs, and configure biometrics.';
       case 'teacher':
         return 'Teacher Station: Start class sessions, live AI face HUD, and view student attendance.';
       case 'student':
@@ -408,6 +468,19 @@ class _LoginScreenState extends State<LoginScreen> {
         return 'e.g. 2025(s)-SE-5 or 2024-CS-001';
       default:
         return 'Enter identifier';
+    }
+  }
+
+  String _getSystemHelperHint() {
+    switch (_activeRole) {
+      case 'admin':
+        return 'Default admin credentials: admin / admin123';
+      case 'teacher':
+        return 'Faculty accounts: teacher / teacher123';
+      case 'student':
+        return 'Student accounts: 2024-CS-001 / student123';
+      default:
+        return 'Use your institution credentials to sign in.';
     }
   }
 }

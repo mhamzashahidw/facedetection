@@ -5,7 +5,7 @@ import os
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from app.database import engine, SessionLocal
-from app.models import Base, Student, Teacher, Course, Enrollment, Session as CourseSession, Attendance
+from app.models import Base, Student, Teacher, Admin, Course, Enrollment, Session as CourseSession, Attendance
 from app.auth_utils import get_password_hash
 from datetime import datetime, timezone, timedelta
 
@@ -15,6 +15,23 @@ def seed():
     db = SessionLocal()
 
     try:
+        # 0. Admin
+        adm = db.query(Admin).filter((Admin.username == "admin") | (Admin.email == "admin@univision.edu")).first()
+        if not adm:
+            adm = Admin(
+                username="admin",
+                email="admin@univision.edu",
+                full_name="System Administrator",
+                password_hash=get_password_hash("admin123")
+            )
+            db.add(adm)
+            db.commit()
+            db.refresh(adm)
+            print("Admin created: admin / admin123")
+        else:
+            adm.password_hash = get_password_hash("admin123")
+            db.commit()
+
         # 1. Teachers
         t1 = db.query(Teacher).filter(Teacher.email == "teacher@school.edu").first()
         if not t1:
@@ -29,6 +46,20 @@ def seed():
             print("Teacher created: teacher@school.edu / teacher123")
         else:
             t1.password_hash = get_password_hash("teacher123")
+            db.commit()
+
+        # Ensure teacher@univision.edu also exists for seamless cloud diagnostics
+        t2 = db.query(Teacher).filter(Teacher.email == "teacher@univision.edu").first()
+        if not t2:
+            t2 = Teacher(
+                full_name="Prof. Alan Turing",
+                email="teacher@univision.edu",
+                password_hash=get_password_hash("teacher123")
+            )
+            db.add(t2)
+            db.commit()
+        else:
+            t2.password_hash = get_password_hash("teacher123")
             db.commit()
 
         # 2. Courses

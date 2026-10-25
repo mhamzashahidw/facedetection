@@ -13,7 +13,7 @@ async def record_audit_log(action: str, entity_type: str, entity_id: int, detail
             action=action,
             entity_type=entity_type,
             entity_id=entity_id,
-            details=json.dumps(details)
+            details=json.dumps(details, default=str)
         )
         db.add(log)
         db.commit()

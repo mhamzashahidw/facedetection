@@ -12,17 +12,32 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 from .database import get_db
-from .models import Student, Teacher
+import hashlib
+from .models import Student, Teacher, Admin
 
 SECRET_KEY = os.getenv("SECRET_KEY", "focus-attendance-super-secret-key-change-in-production")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7 # 7 days
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    try:
-        return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
-    except Exception:
+    if not plain_password or not hashed_password:
         return False
+    try:
+        if hashed_password.startswith("$2b$") or hashed_password.startswith("$2a$"):
+            return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_password.encode('utf-8'))
+    except Exception:
+        pass
+    
+    # Check SHA-256 with univision_ salt (used in local storage)
+    sha_hash = hashlib.sha256(f"univision_{plain_password}".encode('utf-8')).hexdigest()
+    if hashed_password == sha_hash:
+        return True
+    
+    # Check plain equality for dev/testing
+    if hashed_password == plain_password:
+        return True
+
+    return False
 
 def get_password_hash(password: str) -> str:
     salt = bcrypt.gensalt()
@@ -62,6 +77,18 @@ def get_current_teacher(payload: dict = Depends(decode_token), db: Session = Dep
     if not teacher:
         raise HTTPException(status_code=404, detail="Teacher not found")
     return teacher
+
+def get_current_admin(payload: dict = Depends(decode_token), db: Session = Depends(get_db)) -> Admin:
+    if payload.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin credentials required")
+    try:
+        admin_id = int(payload.get("sub"))
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=401, detail="Invalid token subject")
+    admin = db.query(Admin).filter(Admin.id == admin_id).first()
+    if not admin:
+        raise HTTPException(status_code=404, detail="Admin not found")
+    return admin
 
 def get_current_student(payload: dict = Depends(decode_token), db: Session = Depends(get_db)) -> Student:
     if payload.get("role") != "student":

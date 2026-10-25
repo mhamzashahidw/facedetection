@@ -30,6 +30,16 @@ class Teacher(Base):
 
     courses = relationship("Course", back_populates="teacher")
 
+class Admin(Base):
+    __tablename__ = "admins"
+
+    id = Column(Integer, primary_key=True, index=True)
+    username = Column(Text, unique=True, nullable=False, index=True)
+    email = Column(Text, unique=True, nullable=False, index=True)
+    full_name = Column(Text, nullable=False)
+    password_hash = Column(Text, nullable=False)
+    created_at = Column(DateTime(timezone=True), default=get_utc_now)
+
 class Course(Base):
     __tablename__ = "courses"
 

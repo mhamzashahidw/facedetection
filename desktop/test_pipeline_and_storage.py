@@ -212,3 +212,67 @@ def test_bridge_service_api():
 
     bridge_client.post("/api/session/end")
 
+def test_bridge_user_management_endpoints(tmp_path):
+    bridge_client = TestClient(bridge_app)
+
+    # 1. List users
+    users_res = bridge_client.get("/api/users")
+    assert users_res.status_code == 200
+    users = users_res.json()
+    assert len(users) >= 3
+
+    # 2. Create user (student)
+    create_res = bridge_client.post("/api/users", json={
+        "username": "2026-SE-500",
+        "email": "student500@univision.edu",
+        "password": "initial_password_123",
+        "role": "student",
+        "full_name": "Ada Lovelace",
+        "roll_no": "2026-SE-500"
+    })
+    assert create_res.status_code == 200
+    created_user = create_res.json()
+    u_id = created_user["id"]
+
+    # Verify login with initial password
+    login_ok = bridge_client.post("/api/auth/login", json={
+        "identifier": "2026-SE-500",
+        "password": "initial_password_123",
+        "role": "student"
+    })
+    assert login_ok.status_code == 200
+
+    # 3. Edit/Change password
+    pwd_res = bridge_client.put(f"/api/users/{u_id}/password", json={
+        "password": "new_updated_password_456"
+    })
+    assert pwd_res.status_code == 200
+
+    # Verify old password fails
+    login_old_fail = bridge_client.post("/api/auth/login", json={
+        "identifier": "2026-SE-500",
+        "password": "initial_password_123",
+        "role": "student"
+    })
+    assert login_old_fail.status_code == 401
+
+    # Verify new password succeeds
+    login_new_ok = bridge_client.post("/api/auth/login", json={
+        "identifier": "2026-SE-500",
+        "password": "new_updated_password_456",
+        "role": "student"
+    })
+    assert login_new_ok.status_code == 200
+
+    # 4. Update user details
+    update_res = bridge_client.put(f"/api/users/{u_id}", json={
+        "full_name": "Ada Lovelace Countess of Lovelace"
+    })
+    assert update_res.status_code == 200
+    assert update_res.json()["user"]["full_name"] == "Ada Lovelace Countess of Lovelace"
+
+    # 5. Delete user
+    del_res = bridge_client.delete(f"/api/users/{u_id}")
+    assert del_res.status_code == 200
+
+

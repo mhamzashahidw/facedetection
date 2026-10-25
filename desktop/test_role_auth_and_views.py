@@ -158,3 +158,56 @@ def test_main_window_role_views_and_navigation(tmp_path):
     assert "Biometrics Enroll" not in student_nav
 
     win.close()
+
+def test_admin_can_make_and_edit_user_passwords(tmp_path):
+    test_db = str(tmp_path / "test_pwd_mgmt.db")
+    storage = LocalStorage(db_path=test_db)
+
+    # 1. Admin creates teacher user
+    t_user = storage.create_user(
+        username="newteacher",
+        email="newteacher@school.edu",
+        password="initial_teacher_pwd",
+        role="teacher",
+        full_name="Dr. Claude Shannon"
+    )
+    assert t_user["id"] is not None
+    assert t_user["username"] == "newteacher"
+
+    # Login with initial password succeeds
+    assert storage.authenticate_user("newteacher", "initial_teacher_pwd", role="teacher") is not None
+
+    # 2. Admin edits password for the teacher
+    ok = storage.update_user_password(t_user["id"], "updated_teacher_secret_999")
+    assert ok is True
+
+    # Old password fails
+    assert storage.authenticate_user("newteacher", "initial_teacher_pwd", role="teacher") is None
+    # New password succeeds
+    assert storage.authenticate_user("newteacher", "updated_teacher_secret_999", role="teacher") is not None
+
+    # 3. Admin creates student user
+    s_user = storage.create_user(
+        username="2026-CS-777",
+        email="student777@school.edu",
+        password="custom_student_initial_pwd",
+        role="student",
+        full_name="John von Neumann",
+        roll_no="2026-CS-777"
+    )
+    assert s_user["id"] is not None
+
+    # Login with custom initial password
+    assert storage.authenticate_user("2026-CS-777", "custom_student_initial_pwd", role="student") is not None
+
+    # 4. Admin edits student's password
+    ok_st = storage.update_user_password(s_user["id"], "john_new_password_888")
+    assert ok_st is True
+
+    # Old password fails
+    assert storage.authenticate_user("2026-CS-777", "custom_student_initial_pwd", role="student") is None
+    # Default student123 fails because a custom password was explicitly set
+    assert storage.authenticate_user("2026-CS-777", "student123", role="student") is None
+    # New password succeeds
+    assert storage.authenticate_user("2026-CS-777", "john_new_password_888", role="student") is not None
+

@@ -1,8 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from ..database import get_db
-from ..models import Student, Teacher
-from ..schemas import StudentLogin, TeacherLogin, Token
+from ..models import Student, Teacher, Admin
+from ..schemas import StudentLogin, TeacherLogin, AdminLogin, Token
 from ..auth_utils import verify_password, create_access_token
 from ..events.event_bus import event_bus
 
@@ -47,3 +47,23 @@ async def teacher_login(credentials: TeacherLogin, db: Session = Depends(get_db)
     })
 
     return Token(access_token=token, role="teacher", user_id=teacher.id, full_name=teacher.full_name)
+
+@router.post("/admin/login", response_model=Token)
+async def admin_login(credentials: AdminLogin, db: Session = Depends(get_db)):
+    ident = credentials.username_or_email.strip()
+    admin = db.query(Admin).filter((Admin.username == ident) | (Admin.email == ident)).first()
+    if not admin or not verify_password(credentials.password, admin.password_hash):
+        await event_bus.publish("LoginFailed", {"role": "admin", "identifier": ident})
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid admin username/email or password",
+        )
+    token = create_access_token(data={"sub": admin.id, "role": "admin", "username": admin.username})
+
+    await event_bus.publish("AdminLoggedIn", {
+        "admin_id": admin.id,
+        "username": admin.username,
+        "full_name": admin.full_name
+    })
+
+    return Token(access_token=token, role="admin", user_id=admin.id, full_name=admin.full_name)
